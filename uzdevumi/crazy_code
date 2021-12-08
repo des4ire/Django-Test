@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Wed Nov 24 19:22:29 2021
+
+@author: dev
+"""
+
+import csv
+import io
+
+from decimal import Decimal
+from datetime import datetime
+
+from django.shortcuts import (
+    render,
+    reverse,
+)
+
+from django.http import (
+    HttpResponseRedirect,
+    HttpResponseBadRequest,
+)
+
+from salaries import (
+    models,
+    forms,
+)
+
+
+def salaries_list(request):
+    salaries = models.SalaryEntry.objects.all()
+
+    return render(
+        request=request,
+        template_name='salaries/list.html',
+
+        context={
+            'salaries': salaries,
+        }
+    )
+
+
+def get_salaries():
+    return models.SalaryEntry.objects.all()
+
+
+def calculate_age(birth_day):
+    return (datetime.utcnow().date() - birth_day).days / 365.2425
+
+
+def calculate_bonus(amount, age):
+    bonus = Decimal(0)
+
+    if amount < 1000 and age < 30:
+        bonus = Decimal(500)
+
+    return bonus
+
+
+def calculate_final_salary(salary_entry):
+    age = calculate_age(salary_entry.birth_day)
+    bonus = calculate_bonus(salary_entry.amount, age)
+
+    return salary_entry.amount + bonus
+
+
+def calculate_final_salary_budget():
+    salary_entries = get_salaries()
+    total_amount = Decimal(0)
+
+    for salary_entry in salary_entries:
+        total_amount += calculate_final_salary(salary_entry)
+
+    return total_amount
+
+
+def salaries_monthly_report(request):
+    total_amount = calculate_final_salary_budget()
+
+    return render(
+        request=request,
+        template_name='salaries/monthly.html',
+
+        context={
+            'total_amount': total_amount,
+        }
+    )
+
+
+def salary_add(request):
+    if request.method == 'POST':
+        form = forms.SalaryEntryForm(request.POST)
+
+        if form.is_valid():
+            form.save()
+
+            return HttpResponseRedirect(redirect_to=reverse(viewname='salaries-list'))
+
+    else:
+        form = forms.SalaryEntryForm()
+
+    return render(
+        request=request,
+        template_name='salaries/add.html',
+
+        context={
+            'form': form,
+        }
+    )
+
+
+class ValidationException(Exception):
+    pass
+
+
+class Validator:
+    def __init__(self, file):
+        self.file = file
+
+    def validate(self):
+        raise NotImplementedError
+
+
+class LengthValidator(Validator):
+    def validate(self):
+        raise ValidationException('Length is invalid')
+
+
+class DelimiterValidator(Validator):
+    def validate(self):
+        raise ValidationException('Delimiter is invalid')
+
+
+class CSVSalariesImporter:
+    def __init__(self, file):
+        self.file = file
+
+        self.validators = [
+            LengthValidator(self.file),
+            DelimiterValidator(self.file),
+        ]
+
+    def validate(self):
+        for validator in self.validators:
+            validator.validate()
+
+    def load(self):
+        file_data = self.file.read().decode('utf-8')
+
+        file_string = io.StringIO(file_data)
+
+        reader = csv.reader(file_string)
+
+        return reader
+
+    def save(self, reader):
+        for row in reader:
+            first_name, second_name, birth_day, amount = row
+
+            models.SalaryEntry.objects.create(
+                first_name=first_name,
+                second_name=second_name,
+                birth_day=birth_day,
+                amount=amount,
+            )
+
+
+def import_salary_entries(request):
+    if request.method == 'POST':
+        form = forms.UploadFileForm(request.POST, request.FILES)
+
+        if form.is_valid():
+            with form.cleaned_data['file'].open() as data:
+                importer = CSVSalariesImporter(data)
+
+                reader = importer.load()
+
+                try:
+                    importer.validate()
+
+                except ValidationException as exception:
+                    return HttpResponseBadRequest(content=str(exception))
+
+                importer.save(reader)
+
+    else:
+        form = forms.UploadFileForm()
+
+    return render(
+        request=request,
+        template_name='salaries/import.html',
+
+        context={
+            'form': form,
+        }
+)

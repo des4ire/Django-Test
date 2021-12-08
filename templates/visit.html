@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block content %}   
+    <p>
+        <strong>{{ visit.visitor }} will arrive at {{ visit.date_time }}</strong><br>
+        Reason: {{ visit.reason }}
+       <p>Email: {{visit.email}}<p>
+    </p>
+    <button name="button" onclick="del_visit(request, visit_id)">Delete_record</button>
+    {% if visit.image %}
+    <img src="{{ visit.image.url }}">
+    {% endif %}
+{% endblock %}
